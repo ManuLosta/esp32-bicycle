@@ -33,7 +33,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
   display.setTextSize(2);
-   display.drawBitmap(6, 0, Heart_Icon, 16, 16, SH110X_WHITE);
+  display.drawBitmap(6, 0, Heart_Icon, 16, 16, SH110X_WHITE);
   display.setCursor(22, 0);
   display.println(String(myData.bpm));
   display.display();  
