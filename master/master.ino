@@ -11,7 +11,8 @@
 #define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-#define BUTTON_PIN 36
+#define BUTTON_PIN_SCREEN 36
+#define BUTTON_PIN_CAL 39
 
 TinyGPSPlus gps;
 
@@ -26,11 +27,16 @@ typedef struct struct_data {
   double loc_lng;
   double distance;
   double alt;
+  int weight;
+  double calories;
 } struct_data;
 
-struct_data data = {0, 0.0, 0.0, 0.0, 0.0, 0.0};
+struct_data data = {0, 0.0, 0.0, 0.0, 0.0, 0.0, 50, 0.0};
 struct_message msgData;
 int displayState = 0; 
+
+double speeds[] = {0.0, 13.0, 16.0, 19.0, 22.5, 24.0, 25.5, 27.0, 29.0, 30.55, 32.0, 33.5, 37.0, 40.0};
+double coefficient[] = {0.0, 0.000049167, 0.000059167, 0.000071, 0.000085333, 0.0000935, 0.0001025, 0.0001125, 0.000123333, 0.000135167, 0.0001485, 0.0001625, 0.0001955, 0.000235167}; 
 
 const unsigned char Heart_Icon [] PROGMEM = {
   0x00, 0x00, 0x18, 0x30, 0x3c, 0x78, 0x7e, 0xfc, 0xff, 0xfe, 0xff, 0xfe, 0xee, 0xee, 0xd5, 0x56, 
@@ -71,20 +77,13 @@ void setup() {
   display.clearDisplay();
   display.display();
 
-  pinMode(BUTTON_PIN, INPUT);
+  pinMode(BUTTON_PIN_SCREEN, INPUT);
+  pinMode(BUTTON_PIN_CAL, INPUT);
 }
 
 void loop() {
-  if (digitalRead(BUTTON_PIN) == HIGH) {
-    displayState = (displayState + 1) % 2;
-  }
-
   //updateSerial();
   while (Serial2.available() > 0) {
-    if (digitalRead(BUTTON_PIN) == HIGH) {
-      displayState = (displayState + 1) % 2;
-    }
-
     if (gps.encode(Serial2.read()))
       updateData();
   }
@@ -97,9 +96,7 @@ void loop() {
 
 
 void updateData() {
-  if (digitalRead(BUTTON_PIN) == HIGH) {
-    displayState = (displayState + 1) % 2;
-  }
+  checkButtons();
 
   if (gps.satellites.value() >= 5) {
     data.speed = gps.speed.kmph();
@@ -107,6 +104,7 @@ void updateData() {
     data.loc_lat = gps.location.lat();
     data.loc_lng = gps.location.lng();
     data.alt = gps.altitude.meters();
+    data.calories += coefficient[findClosestIndex(speeds, 0, 13, data.speed)] * data.weight;
 
     Serial.println(data.speed);
     Serial.println(data.distance);
@@ -119,6 +117,10 @@ void updateData() {
 
     if (displayState == 1) {
       displayData1();
+    }
+
+    if (displayState == 2) {
+      displayData2();
     }
 
   } else {
@@ -169,6 +171,16 @@ void displayData1() {
   display.display();
 }
 
+void displayData2() {
+  display.clearDisplay();
+  display.setCursor(10,16);
+  display.setTextSize(3);
+  display.print(String(int(data.calories)));
+  display.setTextSize(1);
+  display.print("cal");
+  display.display();
+}
+
 
 void updateSerial() {
   delay(500);
@@ -181,6 +193,69 @@ void updateSerial() {
 }
 
 
-double calculateDistance(double lng, double lat) {
-  return pow(pow(lng, 2) + pow(lat, 2), 1/2);
+void setCalories() {
+  int timer = 0;
+  while(timer < 3000) {
+    Serial.println(data.weight);
+    weightSetup();
+    delay(200);
+    timer += 200;
+    if (digitalRead(BUTTON_PIN_SCREEN) == HIGH) {
+      data.weight++;
+      timer = 0;
+    }
+    else if (digitalRead(BUTTON_PIN_CAL) == HIGH) {
+      data.weight--;
+      timer = 0;
+    }
+  }
+}
+
+void weightSetup() {
+  display.clearDisplay();
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(4, 4);
+  display.setTextSize(1);
+  display.print("Introducir peso:");
+  display.setCursor(40, 20);
+  display.setTextSize(3);
+  display.print(data.weight);
+  display.setTextSize(2);
+  display.print("kg");
+  display.display();
+}
+
+void checkButtons() {
+  if (digitalRead(BUTTON_PIN_SCREEN) == HIGH) {
+    displayState = (displayState + 1) % 3;
+    delay(300);
+  }
+  if (digitalRead(BUTTON_PIN_CAL) == HIGH) {
+    setCalories();
+    delay(300);
+  }
+}
+
+int findClosestIndex(double arr[], int left, int right, int target) {
+    // base case: when there is only one element in the array
+    if (left == right) {
+        return left;
+    }
+  
+    // calculate the middle index
+    int mid = (left + right) / 2;
+  
+    // recursively search the left half of the array
+    int leftClosest = findClosestIndex(arr, left, mid, target);
+  
+    // recursively search the right half of the array
+    int rightClosest = findClosestIndex(arr, mid + 1, right, target);
+  
+    // compare the absolute differences of the closest elements in the left and right halves
+    if (abs(leftClosest - target) <= abs(rightClosest - target)) {
+        return leftClosest;
+    }
+    else {
+        return rightClosest;
+    }
 }
