@@ -11,18 +11,27 @@
 #define OLED_RESET -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-#define BUTTON_PIN_SCREEN 36
-#define BUTTON_PIN_CAL 39
+const int BUTTON_PIN_SCREEN = 36;
+const int BUTTON_PIN_CAL = 39;
+
+int screenButtonState;          
+int lastScreenButtonState = LOW;
+int calButtonState;
+int lastCalButtonState;
+
+unsigned long lastDebounceTime = 0;
+unsigned long debounceDelay = 50; 
+
+int displayState = 0;
+bool noData = false;
 
 TinyGPSPlus gps;
 
-typedef struct struct_message
-{
+typedef struct struct_message {
   int bpm;
 } struct_message;
 
-typedef struct struct_data
-{
+typedef struct struct_data {
   int bpm;
   double speed;
   double loc_lat;
@@ -33,22 +42,22 @@ typedef struct struct_data
   double calories;
   int bpmProm;
   int bpmWrites;
+  int hour;
+  int minutes;
 } struct_data;
 
-struct_data data = {0, 0.0, 0.0, 0.0, 0.0, 0.0, 50, 0.0, 0, 0};
+struct_data data = {0, 0.0, 0.0, 0.0, 0.0, 0.0, 50, 0.0, 0, 0, 0, 0};
 struct_message msgData;
-int displayState = 0;
 
 double speeds[] = {0.0, 13.0, 16.0, 19.0, 22.5, 24.0, 25.5, 27.0, 29.0, 30.55, 32.0, 33.5, 37.0, 40.0};
-double coefficient[] = {0.0, 0.000049167, 0.000059167, 0.000071, 0.000085333, 0.0000935, 0.0001025, 0.0001125, 0.000123333, 0.000135167, 0.0001485, 0.0001625, 0.0001955, 0.000235167};
+double coefficient[] = {0.0, 0.00049167, 0.00059167, 0.00071, 0.00085333, 0.000935, 0.001025, 0.001125, 0.00123333, 0.00135167, 0.001485, 0.001625, 0.001955, 0.00235167};
 
 const unsigned char Heart_Icon[] PROGMEM = {
     0x00, 0x00, 0x18, 0x30, 0x3c, 0x78, 0x7e, 0xfc, 0xff, 0xfe, 0xff, 0xfe, 0xee, 0xee, 0xd5, 0x56,
     0x7b, 0xbc, 0x3f, 0xf8, 0x1f, 0xf0, 0x0f, 0xe0, 0x07, 0xc0, 0x03, 0x80, 0x01, 0x00, 0x00, 0x00};
 
 // callback function that will be executed when data is received
-void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
-{
+void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
   memcpy(&msgData, incomingData, sizeof(msgData));
   Serial.print("Bytes received: ");
   Serial.println(len);
@@ -59,8 +68,7 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len)
   data.bpmProm += msgData.bpm;
 }
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
   Serial2.begin(9600);
 
@@ -68,8 +76,7 @@ void setup()
   WiFi.mode(WIFI_STA);
 
   // Init ESP-NOW
-  if (esp_now_init() != ESP_OK)
-  {
+  if (esp_now_init() != ESP_OK) {
     Serial.println("Error initializing ESP-NOW");
     return;
   }
@@ -88,104 +95,112 @@ void setup()
   pinMode(BUTTON_PIN_CAL, INPUT);
 }
 
-void loop()
-{
+void loop() {
   // updateSerial();
-  while (Serial2.available() > 0)
-  {
+  while (Serial2.available() > 0) {
+  checkButtons();
     if (gps.encode(Serial2.read()))
       updateData();
   }
 
-  if (millis() > 5000 && gps.charsProcessed() < 10)
-  {
+  if (millis() > 5000 && gps.charsProcessed() < 10) {
     Serial.println(F("No GPS detected: check wiring."));
     while (true)
       ;
   }
 }
 
-void updateData()
-{
-  checkButtons();
+void updateData() {
 
-  if (data.bpmWrites == 5)
-    {
+  if (data.bpmWrites >= 5) {
       data.bpm = data.bpmProm / data.bpmWrites;
       data.bpmProm = 0;
       data.bpmWrites = 0;
     }
 
-  if (gps.satellites.value() >= 5)
-  {
+  if (gps.satellites.value() >= 5) {
     data.speed = gps.speed.kmph();
-    data.distance += data.speed * (0.1 / 3600);
+    data.distance += data.speed * (1 / 3600);
     data.loc_lat = gps.location.lat();
     data.loc_lng = gps.location.lng();
     data.alt = gps.altitude.meters();
     data.calories += coefficient[findClosestIndex(speeds, 0, 13, data.speed)] * data.weight;
+    data.hour = gps.time.hour() - 3;
+    data.minutes = gps.time.minute();
 
-    if (displayState == 0)
-    {
-      displayData0();
-    }
+    noData = false;
+  }
 
-    if (displayState == 1)
-    {
+  long currentMills = millis();
+  while (millis() <= currentMills + 1000) {
+    checkButtons();
+    updateDisplay();
+  }
+}
+
+void updateDisplay () {
+  if (noData) {
+    displayNoData();
+  } else {
+    if (displayState == 0) {
+        displayData0();
+      }
+
+    if (displayState == 1) {
       displayData1();
     }
 
-    if (displayState == 2)
-    {
+    if (displayState == 2) {
       displayData2();
     }
 
-    if (displayState == 3)
-    {
+    if (displayState == 3) {
       displayData3();
     }
   }
-  else
-  {
-    display.clearDisplay();
-    display.setTextColor(SH110X_WHITE);
-    display.setCursor(0, 12);
-    display.setTextSize(2);
-    display.println("Buscando");
-    display.println("Satelites");
-    display.display();
-  }
-
-  delay(100);
 }
 
-void displayData0()
-{
+void displayNoData() {
+  display.clearDisplay();
+  display.setTextColor(SH110X_WHITE);
+  display.setCursor(0, 12);
+  display.setTextSize(2);
+  display.println("Buscando");
+  display.println("Satelites");
+  display.display();
+}
+
+void displayData0() {
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
 
-  display.setCursor(0, 0);
+  display.setCursor(0,0);
+  display.setTextSize(1);
+  display.print(String(data.hour));
+  display.print(":");
+  display.print(String(data.minutes));
+
+  display.setCursor(0, 12);
   display.setTextSize(2);
   display.print(String(data.speed));
   display.setTextSize(1);
   display.print("km/h");
 
-  display.setCursor(0, 22);
+  display.setCursor(0, 32);
   display.setTextSize(1.5);
   display.print(String(data.distance));
   display.print("km");
 
-  display.setCursor(18, 32);
+  display.setCursor(18, 44);
   display.setTextSize(1.5);
-  display.drawBitmap(0, 32, Heart_Icon, 16, 16, SH110X_WHITE);
+  display.drawBitmap(0, 44, Heart_Icon, 16, 16, SH110X_WHITE);
   display.print(String(data.bpm));
   display.print(" BPM");
 
   display.display();
 }
 
-void displayData1()
-{
+void displayData1() {
   display.clearDisplay();
   display.setCursor(10, 16);
   display.setTextSize(3);
@@ -195,8 +210,7 @@ void displayData1()
   display.display();
 }
 
-void displayData2()
-{
+void displayData2() {
   display.clearDisplay();
   display.setCursor(10, 16);
   display.setTextSize(3);
@@ -206,8 +220,7 @@ void displayData2()
   display.display();
 }
 
-void displayData3()
-{
+void displayData3() {
   display.clearDisplay();
   display.setCursor(10, 16);
   display.setTextSize(3);
@@ -217,43 +230,34 @@ void displayData3()
   display.display();
 }
 
-void updateSerial()
-{
+void updateSerial() {
   delay(500);
-  while (Serial.available())
-  {
+  while (Serial.available()) {
     Serial2.write(Serial.read()); // Forward what Serial received to Software Serial Port
   }
-  while (Serial2.available())
-  {
+  while (Serial2.available()) {
     Serial.write(Serial2.read()); // Forward what Software Serial received to Serial Port
   }
 }
 
-void setCalories()
-{
-  int timer = 0;
-  while (timer < 3000)
-  {
+void setCalories() {
+  int currentMillis = millis();
+  while (millis() < currentMillis + 3000) {
     Serial.println(data.weight);
     weightSetup();
     delay(200);
-    timer += 200;
-    if (digitalRead(BUTTON_PIN_SCREEN) == HIGH)
-    {
+    if (digitalRead(BUTTON_PIN_SCREEN) == HIGH) {
       data.weight++;
-      timer = 0;
+      currentMillis = millis();
     }
-    else if (digitalRead(BUTTON_PIN_CAL) == HIGH)
-    {
+    else if (digitalRead(BUTTON_PIN_CAL) == HIGH) {
       data.weight--;
-      timer = 0;
+      currentMillis = millis();
     }
   }
 }
 
-void weightSetup()
-{
+void weightSetup() {
   display.clearDisplay();
   display.setTextColor(SH110X_WHITE);
   display.setCursor(4, 4);
@@ -267,25 +271,35 @@ void weightSetup()
   display.display();
 }
 
-void checkButtons()
-{
-  if (digitalRead(BUTTON_PIN_SCREEN) == HIGH)
-  {
-    displayState = (displayState + 1) % 4;
-    delay(300);
+void checkButtons() {
+  int readScreen = digitalRead(BUTTON_PIN_SCREEN);
+  int readCal = digitalRead(BUTTON_PIN_CAL);
+
+  if (readScreen != lastScreenButtonState || readCal != lastCalButtonState) {
+    lastDebounceTime = millis();
   }
-  if (digitalRead(BUTTON_PIN_CAL) == HIGH)
-  {
-    setCalories();
-    delay(300);
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    if (readScreen != screenButtonState) {
+      screenButtonState = readScreen;
+      if (screenButtonState == HIGH) {
+        displayState = (displayState + 1) % 4;
+      }
+    } else if (readCal != calButtonState) {
+      calButtonState = readCal;
+      if (calButtonState == HIGH) {
+        setCalories();
+      }
+    }
   }
+
+  lastScreenButtonState = readScreen;
+  lastCalButtonState = readCal;
 }
 
-int findClosestIndex(double arr[], int left, int right, int target)
-{
+int findClosestIndex(double arr[], int left, int right, int target) {
   // base case: when there is only one element in the array
-  if (left == right)
-  {
+  if (left == right) {
     return left;
   }
 
@@ -299,12 +313,10 @@ int findClosestIndex(double arr[], int left, int right, int target)
   int rightClosest = findClosestIndex(arr, mid + 1, right, target);
 
   // compare the absolute differences of the closest elements in the left and right halves
-  if (abs(leftClosest - target) <= abs(rightClosest - target))
-  {
+  if (abs(leftClosest - target) <= abs(rightClosest - target)) {
     return leftClosest;
   }
-  else
-  {
+  else {
     return rightClosest;
   }
 }
