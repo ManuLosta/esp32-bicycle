@@ -44,6 +44,7 @@ typedef struct struct_data {
   int bpmWrites;
   int hour;
   int minutes;
+  double p_altitude;
 } struct_data;
 
 struct_data data = {0, 0.0, 0.0, 0.0, 0.0, 0.0, 50, 0.0, 0, 0, 0, 0};
@@ -52,9 +53,7 @@ struct_message msgData;
 double speeds[] = {0.0, 13.0, 16.0, 19.0, 22.5, 24.0, 25.5, 27.0, 29.0, 30.55, 32.0, 33.5, 37.0, 40.0};
 double coefficient[] = {0.0, 0.00049167, 0.00059167, 0.00071, 0.00085333, 0.000935, 0.001025, 0.001125, 0.00123333, 0.00135167, 0.001485, 0.001625, 0.001955, 0.00235167};
 
-const unsigned char Heart_Icon[] PROGMEM = {
-    0x00, 0x00, 0x18, 0x30, 0x3c, 0x78, 0x7e, 0xfc, 0xff, 0xfe, 0xff, 0xfe, 0xee, 0xee, 0xd5, 0x56,
-    0x7b, 0xbc, 0x3f, 0xf8, 0x1f, 0xf0, 0x0f, 0xe0, 0x07, 0xc0, 0x03, 0x80, 0x01, 0x00, 0x00, 0x00};
+const unsigned char alt_icon[] PROGMEM ={0x18, 0x3c, 0x7e, 0xff, 0x18, 0x18, 0x18, 0x18};
 
 // callback function that will be executed when data is received
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
@@ -123,10 +122,15 @@ void updateData() {
     data.distance += data.speed * (1 / 3600);
     data.loc_lat = gps.location.lat();
     data.loc_lng = gps.location.lng();
-    data.alt = gps.altitude.meters();
     data.calories += coefficient[findClosestIndex(speeds, 0, 13, data.speed)] * data.weight;
     data.hour = gps.time.hour() - 3;
     data.minutes = gps.time.minute();
+
+    double new_altitude = gps.altitude.meters();
+    if (data.alt < new_altitude) {
+      data.p_altitude += (new_altitude - data.alt);
+    }
+    data.alt = new_altitude;
 
     noData = false;
   }
@@ -180,33 +184,31 @@ void displayData0() {
   display.print(":");
   display.print(String(data.minutes));
 
-  display.setCursor(0, 12);
+  display.setCursor(0, 16);
   display.setTextSize(2);
-  display.print(String(data.speed));
-  display.setTextSize(1);
-  display.print("km/h");
-
-  display.setCursor(0, 32);
-  display.setTextSize(1.5);
   display.print(String(data.distance));
   display.print("km");
 
-  display.setCursor(18, 44);
-  display.setTextSize(1.5);
-  display.drawBitmap(0, 44, Heart_Icon, 16, 16, SH110X_WHITE);
-  display.print(String(data.bpm));
-  display.print(" BPM");
+  display.drawBitmap(0, 34, alt_icon, 8, 8, SH110X_WHITE);
+  display.setCursor(12, 34);
+  display.print(String(int(data.p_altitude)));
+  display.print("m");
 
   display.display();
 }
 
 void displayData1() {
   display.clearDisplay();
-  display.setCursor(10, 16);
+  display.setCursor(8, 10);
   display.setTextSize(3);
-  display.print(String(data.speed));
+  display.print(String(int(data.speed)));
   display.setTextSize(1);
   display.print("km/h");
+  display.setTextSize(2);
+  display.setCursor(8, 40);
+  display.print(String(data.distance));
+  display.setTextSize(1);
+  display.print("km");
   display.display();
 }
 
